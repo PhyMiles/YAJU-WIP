@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>系統櫃進度排程與回報系統</title>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+    <style>
+        /* CSS 變數：方便切換明暗主題 */
+        :root {
+            --bg-color: #f4f7f6;
+            --card-bg: #ffffff;
+            --text-color: #333333;
+            --border-color: #cccccc;
+            --table-header-bg: #f8f9fa;
+            --input-bg: #ffffff;
+            --sub-text: #555555;
+        }
+
+        /* 深色模式變數 */
+        body.dark-mode {
+            --bg-color: #121212;
+            --card-bg: #1e1e1e;
+            --text-color: #e0e0e0;
+            --border-color: #444444;
+            --table-header-bg: #2d2d2d;
+            --input-bg: #2d2d2d;
+            --sub-text: #aaaaaa;
+        }
+
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            padding: 20px; 
+            background-color: var(--bg-color); 
+            color: var(--text-color);
+            transition: background-color 0.3s, color 0.3s;
+        }
+        
+        .header-container { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .theme-toggle-btn { background: none; border: 1px solid var(--border-color); color: var(--text-color); font-size: 20px; padding: 5px 10px; border-radius: 20px; cursor: pointer; }
+        
+        .card { background: var(--card-bg); padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; transition: background-color 0.3s; }
+        h1, h2, h3 { color: var(--text-color); margin-top: 0; }
+        
+        .form-group { margin-bottom: 15px; }
+        label { display: inline-block; width: 100px; font-weight: bold; }
+        input, select, textarea { 
+            padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; font-size: 16px;
+            background-color: var(--input-bg); color: var(--text-color);
+        }
+        button { background-color: #007bff; color: white; border: none; cursor: pointer; padding: 8px 12px; border-radius: 4px; font-size: 16px; }
+        button:hover { background-color: #0056b3; }
+        .ocr-btn { background-color: #28a745; }
+        .delete-btn { background-color: #dc3545; padding: 5px 10px; font-size: 14px; }
+        .delete-btn:hover { background-color: #c82333; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px; color: #333; /* 表格內文字預設，避免被深色模式影響狀態底色 */ }
+        body.dark-mode table { color: var(--text-color); }
+        th, td { border: 1px solid var(--border-color); padding: 10px; text-align: center; }
+        th { background-color: var(--table-header-bg); }
+        
+        .checkbox-container { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .completed-text { font-style: italic; font-size: 12px; color: var(--sub-text); margin-top: 5px; }
+        
+        /* 狀態顏色 (強制設定文字顏色，確保在深色模式下依然清晰) */
+        .status-ahead { background-color: #d4edda !important; color: #155724 !important; } 
+        .status-ontime { background-color: #fff3cd !important; color: #856404 !important; } 
+        .status-behind { background-color: #f8d7da !important; color: #721c24 !important; } 
+        
+        #reportArea { width: 100%; height: 100px; margin-top: 10px; box-sizing: border-box; }
+        
+        .footer { text-align: center; margin-top: 30px; font-size: 13px; color: var(--sub-text); }
+
+        @media (max-width: 768px) {
+            table { display: block; overflow-x: auto; white-space: nowrap; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="header-container">
+    <h1>排程與回報系統</h1>
+    <button class="theme-toggle-btn" onclick="toggleTheme()" id="themeBtn">🌙</button>
+</div>
+
+<div class="card">
+    <h2>新增排程任務</h2>
+    <div class="form-group">
+        <label>交期：</label>
+        <input type="date" id="dueDate">
+    </div>
+    <div class="form-group">
+        <label>路名：</label>
+        <input type="text" id="streetName" placeholder="例如：成泰路">
+    </div>
+    <div class="form-group">
+        <label>廠名：</label>
+        <select id="factoryName">
+            <option value="桃園">桃園廠</option>
+            <option value="彰化">彰化廠</option>
+            <option value="台南">台南廠</option>
+        </select>
+    </div>
+    <div class="form-group">
+        <label>圖面數量：</label>
+        <input type="number" id="drawCount" min="1" value="1">
+    </div>
+    <div class="form-group">
+        <label>特殊流程：</label>
+        <input type="checkbox" id="isFinishing"> 收尾 (交期1天)
+    </div>
+    <button onclick="addTasks()">➕ 新增排程</button>
+    <hr style="border-top: 1px solid var(--border-color); margin: 20px 0;">
+    <h3>相機自動帶入</h3>
+    <input type="file" accept="image/*" capture="environment" id="cameraInput" style="margin-bottom: 10px; display: block;">
+    <button class="ocr-btn" onclick="processImage()">📷 辨識標籤文字</button>
+    <span id="ocrStatus" style="margin-left: 10px;"></span>
+</div>
+
+<div class="card">
+    <h2>進度看板</h2>
+    <table id="taskTable">
+        <thead>
+            <tr>
+                <th>交期</th>
+                <th>廠名</th>
+                <th>路名(子項)</th>
+                <th>1.裁切</th>
+                <th>2.封邊</th>
+                <th>3.打洞</th>
+                <th>4.點板</th>
+                <th>5.組裝</th>
+                <th>6.最後一站</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody id="taskBody">
+            </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h2>回報產生器</h2>
+    <button onclick="generateReport()">產生 LINE 回報文字</button>
+    <button onclick="copyReport()" style="background-color: #6c757d;">📋 複製到剪貼簿</button>
+    <textarea id="reportArea" placeholder="產生的回報將顯示於此，您可手動修改備註..."></textarea>
+</div>
+
+<div class="footer">
+    開發者：程式夥伴 (Company internal use) | 版本：v1.1.0
+</div>
+
+<script>
+    // === 🌙 深色模式設定 ===
+    function toggleTheme() {
+        const body = document.body;
+        const themeBtn = document.getElementById("themeBtn");
+        body.classList.toggle("dark-mode");
+        
+        if (body.classList.contains("dark-mode")) {
+            themeBtn.innerText = "☀️";
+            localStorage.setItem("themePreference", "dark");
+        } else {
+            themeBtn.innerText = "🌙";
+            localStorage.setItem("themePreference", "light");
+        }
+    }
+
+    // 載入主題偏好
+    function loadThemePreference() {
+        const savedTheme = localStorage.getItem("themePreference");
+        if (savedTheme === "dark") {
+            document.body.classList.add("dark-mode");
+            document.getElementById("themeBtn").innerText = "☀️";
+        }
+    }
+
+    // === 📅 人事行政總局 API 設定 ===
+    let isHolidayMap = {}; 
+    let tasks = []; 
+    const stages = ["裁切", "封邊", "打洞", "點板", "組裝", "最後一站"];
+
+    async function fetchTaiwanHolidays() {
+        const currentYear = new Date().getFullYear();
+        const yearsToFetch = [currentYear, currentYear + 1];
+
+        for (const year of yearsToFetch) {
+            const url = `https://cdn.jsdelivr.net/gh/ruyut/TaiwanCalendar/data/${year}.json`;
+            try {
+                const response = await fetch(url);
+                if (!response.ok) continue; 
+                const data = await response.json();
+                
+                data.forEach(day => {
+                    const formattedDate = `${day.date.substring(0,4)}-${day.date.substring(4,6)}-${day.date.substring(6,8)}`;
+                    isHolidayMap[formattedDate] = day.isHoliday; 
+                });
+            } catch (error) {
+                console.error(`❌ 載入 ${year} 年政府行事曆失敗：`, error);
+            }
+        }
+        
+        // 假日載入完成後，讀取儲存在設備中的資料
+        loadTasksFromStorage();
+    }
+
+    // 網頁載入時自動執行 (先載入主題，再抓假日與資料)
+    window.onload = () => {
+        loadThemePreference();
+        fetchTaiwanHolidays();
+    };
+
+    // === 💾 資料儲存與讀取 (localStorage) ===
+    function saveTasksToStorage() {
+        localStorage.setItem('cabinetTasks', JSON.stringify(tasks));
+    }
+
+    function loadTasksFromStorage() {
+        const storedData = localStorage.getItem('cabinetTasks');
+        if (storedData) {
+            tasks = JSON.parse(storedData);
+            
+            tasks.forEach(task => {
+                stages.forEach(stage => {
+                    if (task.schedule[stage] && task.schedule[stage].date) {
+                        task.schedule[stage].date = new Date(task.schedule[stage].date);
+                    }
+                });
+            });
+        }
+        renderTable(); 
+    }
+
+    // === ⚙️ 任務排程核心邏輯 ===
+    function subtractWorkingDays(dateStr, daysToSubtract) {
+        let date = new Date(dateStr);
+        let addedDays = 0;
+        
+        while (addedDays < daysToSubtract) {
+            date.setDate(date.getDate() - 1);
+            let dateFormatted = date.toISOString().split('T')[0];
+            
+            if (isHolidayMap[dateFormatted] !== undefined) {
+                if (isHolidayMap[dateFormatted] === false) {
+                    addedDays++;
+                }
+            } else {
+                let dayOfWeek = date.getDay();
+                if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+                    addedDays++;
+                }
+            }
+        }
+        return date;
+    }
+
+    function addTasks() {
+        const dueDate = document.getElementById("dueDate").value;
+        const street = document.getElementById("streetName").value;
+        const factory = document.getElementById("factoryName").value;
+        const count = parseInt(document.getElementById("drawCount").value);
+        const isFinishing = document.getElementById("isFinishing").checked;
+
+        if (!dueDate || !street) {
+            alert("請填寫交期與路名！");
+            return;
+        }
+
+        let lastStationName = "待安裝";
+        if (factory === "彰化") lastStationName = "待下彰化(二/三)";
+        if (factory === "台南") lastStationName = "待下台南(二/三)";
+
+        let subItems = [];
+        if (count >= 2) {
+            for (let i = 1; i <= count; i++) {
+                subItems.push(`${count}-${i}`);
+            }
+        } else {
+            subItems.push(""); 
+        }
+
+        subItems.forEach(sub => {
+            const taskName = sub ? `${street} (${sub})` : street;
+            let schedule = {};
+            
+            if (isFinishing) {
+                let finishDate = subtractWorkingDays(dueDate, 1);
+                stages.forEach(stage => schedule[stage] = { date: finishDate, status: "pending", completedTime: null });
+            } else {
+                schedule["裁切"] = { date: subtractWorkingDays(dueDate, 5), status: "pending", completedTime: null };
+                schedule["封邊"] = { date: subtractWorkingDays(dueDate, 4), status: "pending", completedTime: null };
+                schedule["打洞"] = { date: subtractWorkingDays(dueDate, 3), status: "pending", completedTime: null };
+                schedule["點板"] = { date: subtractWorkingDays(dueDate, 3), status: "pending", completedTime: null };
+                schedule["組裝"] = { date: subtractWorkingDays(dueDate, 2), status: "pending", completedTime: null };
+                schedule["最後一站"] = { date: new Date(dueDate), status: "pending", completedTime: null };
+            }
+
+            tasks.push({
+                id: Date.now() + Math.random(),
+                dueDate: dueDate,
+                street: street,
+                sub: sub,
+                factory: factory,
+                taskName: taskName,
+                isFinishing: isFinishing,
+                lastStationName: lastStationName,
+                schedule: schedule
+            });
+        });
+
+        saveTasksToStorage(); 
+        renderTable();
+    }
+
+    function getFormattedCurrentTime() {
+        const now = new Date();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        return `${month}${day} ${hours}:${minutes}`;
+    }
+
+    function getStatusClass(targetDateObj, isFinishing) {
+        if (isFinishing) return "status-behind"; 
+        const now = new Date();
+        now.setHours(0,0,0,0);
+        const target = new Date(targetDateObj);
+        target.setHours(0,0,0,0);
+
+        if (now < target) return "status-ahead"; 
+        if (now.getTime() === target.getTime()) return "status-ontime"; 
+        return "status-behind"; 
+    }
+
+    function toggleComplete(taskId, stageName) {
+        let task = tasks.find(t => t.id === taskId);
+        if (task.schedule[stageName].status === "pending") {
+            task.schedule[stageName].status = "completed";
+            task.schedule[stageName].completedTime = getFormattedCurrentTime();
+        } else {
+            task.schedule[stageName].status = "pending";
+            task.schedule[stageName].completedTime = null;
+        }
+        
+        saveTasksToStorage(); 
+        renderTable();
+    }
+
+    function finishTask(taskId) {
+        const confirmDelete = confirm("確定該項目已全數完成並要結案嗎？\n結案後將從畫面中永久移除。");
+        if (confirmDelete) {
+            tasks = tasks.filter(t => t.id !== taskId);
+            saveTasksToStorage(); 
+            renderTable(); 
+        }
+    }
+
+    function renderTable() {
+        const tbody = document.getElementById("taskBody");
+        tbody.innerHTML = "";
+
+        tasks.forEach(task => {
+            let tr = document.createElement("tr");
+            tr.innerHTML = `
+                <td>${task.dueDate}</td>
+                <td>${task.factory}</td>
+                <td>${task.taskName} ${task.isFinishing ? "<br><small style='color:#dc3545;'>(收尾)</small>" : ""}</td>
+            `;
+
+            stages.forEach((stage) => {
+                let cell = document.createElement("td");
+                let stageData = task.schedule[stage];
+                
+                let bgClass = "";
+                if (stageData.status === "pending") {
+                    bgClass = getStatusClass(stageData.date, task.isFinishing);
+                }
+                cell.className = bgClass;
+
+                let content = "";
+                let displayStageName = stage === "最後一站" ? task.lastStationName : stage;
+
+                if (stageData.status === "completed") {
+                    content = `<div class="checkbox-container">
+                                   <input type="checkbox" checked onclick="toggleComplete(${task.id}, '${stage}')">
+                                   <div class="completed-text">${stageData.completedTime}</div>
+                               </div>`;
+                } else {
+                    let dateStr = stageData.date.toISOString().split('T')[0].substring(5); 
+                    content = `<div class="checkbox-container">
+                                   <small>${displayStageName} (${dateStr})</small>
+                                   <input type="checkbox" onclick="toggleComplete(${task.id}, '${stage}')">
+                               </div>`;
+                }
+                cell.innerHTML = content;
+                tr.appendChild(cell);
+            });
+            
+            let actionCell = document.createElement("td");
+            actionCell.innerHTML = `<button class="delete-btn" onclick="finishTask(${task.id})">結案</button>`;
+            tr.appendChild(actionCell);
+
+            tbody.appendChild(tr);
+        });
+    }
+
+    function generateReport() {
+        let groups = {};
+        tasks.forEach(task => {
+            let key = `${task.dueDate} ${task.street}`;
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(task);
+        });
+
+        let reportLines = [];
+        for (let key in groups) {
+            let groupTasks = groups[key];
+            let highestStageIndex = -1;
+
+            groupTasks.forEach(t => {
+                let taskMaxStage = -1;
+                for (let i = 0; i < stages.length; i++) {
+                    if (t.schedule[stages[i]].status === "completed") {
+                        taskMaxStage = i;
+                    }
+                }
+                if (taskMaxStage > highestStageIndex) {
+                    highestStageIndex = taskMaxStage;
+                }
+            });
+
+            let currentProgressStr = "尚未開始";
+            if (highestStageIndex >= 0) {
+                if (stages[highestStageIndex] === "最後一站") {
+                    currentProgressStr = groupTasks[0].lastStationName;
+                } else {
+                    currentProgressStr = stages[highestStageIndex];
+                }
+            }
+            reportLines.push(`${key}：${currentProgressStr}`);
+        }
+
+        const dateHeader = new Date().toISOString().split('T')[0].substring(5).replace('-','/');
+        document.getElementById("reportArea").value = `${dateHeader} 每日進度回報：\n` + reportLines.join("\n");
+    }
+
+    function copyReport() {
+        const text = document.getElementById("reportArea");
+        text.select();
+        document.execCommand("copy");
+        alert("已複製到剪貼簿！可以貼上到 LINE 群組囉。");
+    }
+
+    // === 📷 相機圖片 OCR 文字辨識 ===
+    function processImage() {
+        const fileInput = document.getElementById("cameraInput");
+        const statusSpan = document.getElementById("ocrStatus");
+        
+        if (fileInput.files.length === 0) {
+            alert("請先拍攝或選擇包含標籤的照片！");
+            return;
+        }
+
+        statusSpan.innerText = "⏳ 辨識中，請稍候...";
+        
+        const file = fileInput.files[0];
+        Tesseract.recognize(file, 'chi_tra+eng', { logger: m => console.log(m) })
+            .then(({ data: { text } }) => {
+                statusSpan.innerText = "✅ 辨識完成！";
+                
+                let month = "", day = "";
+                const dateMatch = text.match(/\b(0[1-9]|1[0-2])[-/](0[1-9]|[12]\d|3[01])\b/);
+                if (dateMatch) {
+                    month = dateMatch[1];
+                    day = dateMatch[2];
+                }
+
+                let street = "", drawCount = "1";
+                const streetMatch = text.match(/([\u4e00-\u9fa5]+(?:路|街|道|段))\s*(\d+)\s*-\s*\d+/);
+                if (streetMatch) {
+                    street = streetMatch[1]; 
+                    drawCount = streetMatch[2]; 
+                }
+
+                if (month && day && street) {
+                    const currentYear = new Date().getFullYear();
+                    document.getElementById("dueDate").value = `${currentYear}-${month}-${day}`;
+                    document.getElementById("streetName").value = street;
+                    document.getElementById("drawCount").value = drawCount;
+                    
+                    alert(`辨識成功！\n已帶入交期：${month}月${day}日\n路名：${street}\n數量：${drawCount}`);
+                } else {
+                    alert("無法完全解析標籤，請檢查圖片清晰度。\n\n系統看到的原始文字為：\n" + text);
+                }
+            })
+            .catch(err => {
+                statusSpan.innerText = "❌ 辨識失敗";
+                console.error(err);
+            });
+    }
+</script>
+</body>
+</html>
